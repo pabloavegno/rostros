@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
-import { listAlbums } from '../services/googlePhotosService';
+import { listAlbums, PhotosApiError } from '../services/googlePhotosService';
 import type { Album, GoogleTokenResponse, ListAlbumsResponse } from '../types';
 
 // --- Helper Components (defined outside to prevent re-creation on re-renders) ---
@@ -36,6 +35,27 @@ const AlbumCard: React.FC<AlbumCardProps> = ({ album }) => (
     </div>
 );
 
+const EnableApiError: React.FC = () => (
+    <div className="text-center p-8 bg-yellow-50 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 rounded-lg shadow-md max-w-2xl mx-auto">
+        <h3 className="text-xl font-bold mb-2">Action Required: Enable the Google Photos API</h3>
+        <p className="mb-4">
+            To allow this application to view your albums, you must enable the "Photos Library API" in your Google Cloud project.
+            This is a one-time setup step.
+        </p>
+        <a
+            href="https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block px-6 py-3 text-base font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-900"
+        >
+            Enable API in Google Cloud
+        </a>
+        <p className="text-xs mt-4">
+            After enabling the API, please log out and sign back in. It might take a minute for the change to take effect.
+        </p>
+    </div>
+);
+
 // --- Main Explorer Component ---
 
 interface AlbumExplorerProps {
@@ -46,7 +66,7 @@ interface AlbumExplorerProps {
 const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }) => {
     const [albums, setAlbums] = useState<Album[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [errorNode, setErrorNode] = useState<React.ReactNode | null>(null);
     const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
@@ -58,9 +78,21 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
             const data: ListAlbumsResponse = await listAlbums(token, pageToken);
             setAlbums(prev => [...prev, ...(data.albums || [])]);
             setNextPageToken(data.nextPageToken);
-            setError(null);
+            setErrorNode(null);
         } catch (err) {
-            setError('Failed to load albums. Your session may have expired. Please try logging out and in again.');
+            if (err instanceof PhotosApiError && err.isPermissionDenied() && err.message.includes('Photos Library API has not been used')) {
+                setErrorNode(<EnableApiError />);
+            } else {
+                 const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+                 const genericError = (
+                    <div className="text-center p-8 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
+                        <p className="font-semibold">An Error Occurred</p>
+                        <p>{message}</p>
+                        <p className="text-sm mt-2">Your session may have expired. Please try logging out and in again.</p>
+                    </div>
+                );
+                setErrorNode(genericError);
+            }
             console.error(err);
         } finally {
             setLoading(false);
@@ -99,21 +131,18 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
             </header>
 
             <main className="flex-grow container mx-auto p-4 sm:p-6 lg:p-8">
-                <div className="text-center mb-8">
-                    <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">Your Google Photos Albums</h2>
-                    <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-                        Albums automatically created for people & pets are usually listed here.
-                    </p>
-                </div>
-                {loading ? (
+                 {loading ? (
                     <Spinner />
-                ) : error ? (
-                    <div className="text-center p-8 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
-                        <p className="font-semibold">An Error Occurred</p>
-                        <p>{error}</p>
-                    </div>
+                ) : errorNode ? (
+                    errorNode
                 ) : (
                     <>
+                        <div className="text-center mb-8">
+                            <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">Your Google Photos Albums</h2>
+                            <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
+                                Albums automatically created for people & pets are usually listed here.
+                            </p>
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                             {albums.map(album => (
                                 <AlbumCard key={album.id} album={album} />
