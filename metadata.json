@@ -1,0 +1,5 @@
+{
+  "name": "Google Photos People Albums",
+  "description": "A web application to connect to your Google Photos account and browse all your albums, helping you find those related to specific people and faces.",
+  "requestFramePermissions": []
+}
