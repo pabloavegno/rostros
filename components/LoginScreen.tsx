@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import type { GoogleTokenResponse } from '../types';
 
-const SCOPES = 'https://www.googleapis.com/auth/photoslibrary.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/photoslibrary.readonly https://www.googleapis.com/auth/photoslibrary.sharing';
 // IMPORTANT: You must replace this placeholder value with your own Google Client ID.
 // Follow the instructions on the login screen if you see a configuration error.
 const CLIENT_ID = '446766335213-8t2ms4b9aaio03g827qoc151o99ikf9l.apps.googleusercontent.com';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { listAlbums, PhotosApiError } from '../services/googlePhotosService';
-import type { Album, GoogleTokenResponse, ListAlbumsResponse } from '../types';
+import { listAlbums, listSharedAlbums, PhotosApiError } from '../services/googlePhotosService';
+import type { Album, GoogleTokenResponse } from '../types';
 
 // --- Helper Components (defined outside to prevent re-creation on re-renders) ---
 
@@ -67,49 +67,92 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
     const [albums, setAlbums] = useState<Album[]>([]);
     const [loading, setLoading] = useState(true);
     const [errorNode, setErrorNode] = useState<React.ReactNode | null>(null);
-    const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
+    const [ownedNextPageToken, setOwnedNextPageToken] = useState<string | undefined>(undefined);
+    const [sharedNextPageToken, setSharedNextPageToken] = useState<string | undefined>(undefined);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-    const fetchAlbums = useCallback(async (token: string, pageToken?: string) => {
-        if (pageToken) setIsLoadingMore(true);
-        else setLoading(true);
-
+    const handleError = (err: unknown) => {
+        if (err instanceof PhotosApiError && err.isPermissionDenied() && err.message.includes('Photos Library API has not been used')) {
+            setErrorNode(<EnableApiError />);
+        } else {
+             const message = err instanceof Error ? err.message : 'An unknown error occurred.';
+             const genericError = (
+                <div className="text-center p-8 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
+                    <p className="font-semibold">An Error Occurred</p>
+                    <p>{message}</p>
+                    <p className="text-sm mt-2">Your session may have expired. Please try logging out and in again.</p>
+                </div>
+            );
+            setErrorNode(genericError);
+        }
+        console.error(err);
+    };
+    
+    const loadInitialAlbums = useCallback(async (token: string) => {
+        setLoading(true);
         try {
-            const data: ListAlbumsResponse = await listAlbums(token, pageToken);
-            setAlbums(prev => [...prev, ...(data.albums || [])]);
-            setNextPageToken(data.nextPageToken);
+            const [ownedData, sharedData] = await Promise.all([
+                listAlbums(token),
+                listSharedAlbums(token)
+            ]);
+
+            const newOwned = ownedData.albums || [];
+            const newShared = sharedData.sharedAlbums || [];
+            const combined = [...newOwned, ...newShared];
+            const uniqueMap = new Map(combined.map(a => [a.id, a]));
+            
+            setAlbums(Array.from(uniqueMap.values()).sort((a, b) => (a.title || '').localeCompare(b.title || '')));
+            setOwnedNextPageToken(ownedData.nextPageToken);
+            setSharedNextPageToken(sharedData.nextPageToken);
             setErrorNode(null);
         } catch (err) {
-            if (err instanceof PhotosApiError && err.isPermissionDenied() && err.message.includes('Photos Library API has not been used')) {
-                setErrorNode(<EnableApiError />);
-            } else {
-                 const message = err instanceof Error ? err.message : 'An unknown error occurred.';
-                 const genericError = (
-                    <div className="text-center p-8 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
-                        <p className="font-semibold">An Error Occurred</p>
-                        <p>{message}</p>
-                        <p className="text-sm mt-2">Your session may have expired. Please try logging out and in again.</p>
-                    </div>
-                );
-                setErrorNode(genericError);
-            }
-            console.error(err);
+            handleError(err);
         } finally {
             setLoading(false);
-            setIsLoadingMore(false);
         }
     }, []);
 
     useEffect(() => {
-        fetchAlbums(tokenResponse.access_token);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tokenResponse]);
+        if(tokenResponse.access_token) {
+            loadInitialAlbums(tokenResponse.access_token);
+        }
+    }, [tokenResponse.access_token, loadInitialAlbums]);
 
-    const handleLoadMore = () => {
-        if (nextPageToken) {
-            fetchAlbums(tokenResponse.access_token, nextPageToken);
+    const handleLoadMore = async () => {
+        setIsLoadingMore(true);
+        try {
+            const promises = [];
+            if(ownedNextPageToken) {
+                promises.push(listAlbums(tokenResponse.access_token, ownedNextPageToken));
+            } else {
+                promises.push(Promise.resolve({ albums: [], nextPageToken: undefined }));
+            }
+            if(sharedNextPageToken) {
+                promises.push(listSharedAlbums(tokenResponse.access_token, sharedNextPageToken));
+            } else {
+                 promises.push(Promise.resolve({ sharedAlbums: [], nextPageToken: undefined }));
+            }
+
+            const [ownedData, sharedData] = await Promise.all(promises);
+
+            setAlbums(prev => {
+                const newOwned = ownedData.albums || [];
+                const newShared = sharedData.sharedAlbums || [];
+                const combined = [...prev, ...newOwned, ...newShared];
+                const uniqueMap = new Map(combined.map(a => [a.id, a]));
+                return Array.from(uniqueMap.values()).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+            });
+            setOwnedNextPageToken(ownedData.nextPageToken);
+            setSharedNextPageToken(sharedData.nextPageToken);
+
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setIsLoadingMore(false);
         }
     };
+    
+    const hasMoreToLoad = !!ownedNextPageToken || !!sharedNextPageToken;
 
     return (
         <div className="min-h-screen flex flex-col">
@@ -138,9 +181,9 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
                 ) : (
                     <>
                         <div className="text-center mb-8">
-                            <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">Your Google Photos Albums</h2>
+                            <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">Your & Shared Albums</h2>
                             <p className="mt-2 text-lg text-gray-500 dark:text-gray-400">
-                                Albums automatically created for people & pets are usually listed here.
+                                Browse albums you've created and albums that have been shared with you.
                             </p>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
@@ -148,7 +191,7 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
                                 <AlbumCard key={album.id} album={album} />
                             ))}
                         </div>
-                        {nextPageToken && (
+                        {hasMoreToLoad && (
                             <div className="text-center mt-8">
                                 <button
                                     onClick={handleLoadMore}
@@ -162,7 +205,7 @@ const AlbumExplorer: React.FC<AlbumExplorerProps> = ({ tokenResponse, onLogout }
                         {albums.length === 0 && !loading && (
                            <div className="text-center p-8 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded-lg col-span-full">
                                 <p className="font-semibold">No Albums Found</p>
-                                <p>It looks like you don't have any albums in your Google Photos account.</p>
+                                <p>We couldn't find any albums you own or that are shared with you.</p>
                             </div>
                         )}
                     </>

@@ -1,4 +1,4 @@
-import type { ListAlbumsResponse } from '../types';
+import type { ListAlbumsResponse, ListSharedAlbumsResponse } from '../types';
 
 const API_BASE_URL = 'https://photoslibrary.googleapis.com/v1';
 
@@ -58,6 +58,41 @@ export const listAlbums = async (
         return await response.json();
     } catch (error) {
         console.error("Failed to fetch albums:", error);
+        throw error;
+    }
+};
+
+export const listSharedAlbums = async (
+    accessToken: string,
+    pageToken?: string
+): Promise<ListSharedAlbumsResponse> => {
+    const params = new URLSearchParams({
+        pageSize: '50',
+    });
+    if (pageToken) {
+        params.append('pageToken', pageToken);
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/sharedAlbums?${params.toString()}`, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+            },
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            const errorDetails = errorData.error || {};
+            throw new PhotosApiError(
+                errorDetails.message || `API request failed with status ${response.status}`,
+                errorDetails.status || 'UNKNOWN_STATUS',
+                errorDetails.code || response.status
+            );
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch shared albums:", error);
         throw error;
     }
 };

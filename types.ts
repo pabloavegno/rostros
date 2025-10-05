@@ -20,3 +20,8 @@ export interface ListAlbumsResponse {
     albums?: Album[];
     nextPageToken?: string;
 }
+
+export interface ListSharedAlbumsResponse {
+    sharedAlbums?: Album[];
+    nextPageToken?: string;
+}
